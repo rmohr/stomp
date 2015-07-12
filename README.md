@@ -3,6 +3,8 @@ stomp
 
 Go language implementation of a STOMP client library.
 
+[![Build Status](https://travis-ci.org/go-stomp/stomp.svg?branch=v2)](https://travis-ci.org/go-stomp/stomp)
+
 Features:
 
 * Supports STOMP Specifications Versions 1.0, 1.1, 1.2 (https://stomp.github.io/)
