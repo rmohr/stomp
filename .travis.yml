@@ -3,6 +3,13 @@ language: go
 go:
   - 1.4
 
-install:
+before_script:
   - go get gopkg.in/check.v1
+
+install:
+  - go get -t gopkg.in/stomp.v2
+
+script:
+  - cd $HOME/gopath/src/gopkg.in/stomp.v2
+  - go test -v ./...
   
