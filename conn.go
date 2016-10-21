@@ -201,10 +201,7 @@ func readLoop(c *Conn, reader *frame.Reader) {
 	}
 }
 
-// processLoop is a goroutine that handles io with
-// the server.
-func processLoop(c *Conn, writer *frame.Writer) {
-	channels := make(map[string]chan *frame.Frame)
+func watchdog(c *Conn, readSuccess chan bool, writeSuccess chan bool) {
 
 	var readTimeoutChannel <-chan time.Time
 	var readTimer *time.Timer
@@ -217,17 +214,57 @@ func processLoop(c *Conn, writer *frame.Writer) {
 			readTimeoutChannel = readTimer.C
 		}
 		if c.writeTimeout > 0 && writeTimer == nil {
+			writeTimer := time.NewTimer(c.writeTimeout * 2)
+			writeTimeoutChannel = writeTimer.C
+		}
+
+		select {
+		case _, open := <-readSuccess:
+			if readTimer != nil {
+				readTimer.Stop()
+				readTimer = nil
+				readTimeoutChannel = nil
+			}
+			if !open {
+				break
+			}
+		case _, open := <-writeSuccess:
+			if writeTimer != nil {
+				writeTimer.Stop()
+				writeTimer = nil
+				writeTimeoutChannel = nil
+			}
+			if !open {
+				break
+			}
+		case <-readTimeoutChannel:
+			c.MustDisconnect()
+			break
+		case <-writeTimeoutChannel:
+			c.MustDisconnect()
+			break
+		}
+	}
+}
+
+// processLoop is a goroutine that handles io with
+// the server.
+func processLoop(c *Conn, writer *frame.Writer) {
+	channels := make(map[string]chan *frame.Frame)
+
+	var writeTimeoutChannel <-chan time.Time
+	var writeTimer *time.Timer
+	readSuccess := make(chan bool)
+	writeSuccess := make(chan bool)
+	go watchdog(c, readSuccess, writeSuccess)
+
+	for {
+		if c.writeTimeout > 0 && writeTimer == nil {
 			writeTimer := time.NewTimer(c.writeTimeout)
 			writeTimeoutChannel = writeTimer.C
 		}
 
 		select {
-		case <-readTimeoutChannel:
-			// read timeout, close the connection
-			err := newErrorMessage("read timeout")
-			sendError(channels, err)
-			return
-
 		case <-writeTimeoutChannel:
 			// write timeout, send a heart-beat frame
 			err := writer.Write(nil)
@@ -235,16 +272,12 @@ func processLoop(c *Conn, writer *frame.Writer) {
 				sendError(channels, err)
 				return
 			}
+			writeSuccess <- true
 			writeTimer = nil
 			writeTimeoutChannel = nil
 
 		case f, ok := <-c.readCh:
-			// stop the read timer
-			if readTimer != nil {
-				readTimer.Stop()
-				readTimer = nil
-				readTimeoutChannel = nil
-			}
+			readSuccess <- true
 
 			if !ok {
 				err := newErrorMessage("connection closed")
@@ -329,6 +362,7 @@ func processLoop(c *Conn, writer *frame.Writer) {
 				sendError(channels, err)
 				return
 			}
+			writeSuccess <- true
 		}
 	}
 }
